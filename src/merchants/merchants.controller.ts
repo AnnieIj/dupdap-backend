@@ -56,7 +56,11 @@ export class MerchantsController {
     @Request() req: { user: { merchantId: string } },
     @Body() dto: GenerateApiKeyDto,
   ) {
-    return this.merchantsService.generateApiKey(req.user.merchantId, dto.scopes);
+    return this.merchantsService.generateApiKey(
+      req.user.merchantId,
+      dto.scopes,
+      dto.expiresAt,
+    );
   }
 
   @Get('me/notification-prefs')

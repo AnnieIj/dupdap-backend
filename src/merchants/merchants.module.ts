@@ -7,9 +7,10 @@ import { Merchant } from './entities/merchant.entity';
 import { NotificationPreference } from '../notifications/entities/notification-preference.entity';
 import { NotificationPrefsService } from '../notifications/notification-prefs.service';
 import { CacheModule } from '../cache/cache.module';
+import { AuditLog } from '../audit/entities/audit-log.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Merchant, NotificationPreference]), CacheModule],
+  imports: [TypeOrmModule.forFeature([Merchant, NotificationPreference, AuditLog]), CacheModule],
   controllers: [MerchantsController, MerchantsAdminController],
   providers: [MerchantsService, NotificationPrefsService],
   exports: [MerchantsService, NotificationPrefsService],

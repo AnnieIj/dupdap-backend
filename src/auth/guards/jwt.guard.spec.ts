@@ -40,7 +40,7 @@ describe('JwtAuthGuard', () => {
     json: jest.fn().mockReturnThis(),
   };
 
-  const makeContext = (req: Record<string, unknown>): ExecutionContext =>
+  const makeCtx = (req: Record<string, unknown>): ExecutionContext =>
     ({
       switchToHttp: () => ({
         getRequest: () => req,
@@ -69,6 +69,7 @@ describe('JwtAuthGuard', () => {
         email: 'm@example.com',
         role: MerchantRole.MERCHANT,
         apiKeyScopes: ['payments:read'],
+        apiKeyExpiresAt: null,
       });
       rateLimitService.checkApiKeyRateLimit.mockResolvedValueOnce({
         allowed: true,
@@ -78,7 +79,7 @@ describe('JwtAuthGuard', () => {
       });
       reflector.getAllAndOverride.mockReturnValueOnce(undefined);
 
-      await expect(guard.canActivate(makeContext(req))).resolves.toBe(true);
+      await expect(guard.canActivate(makeCtx(req))).resolves.toBe(true);
       expect(authService.findMerchantByApiKey).toHaveBeenCalledWith('raw-key');
       expect(req.user).toEqual({
         merchantId: 'm-1',
@@ -93,7 +94,7 @@ describe('JwtAuthGuard', () => {
       authService.findMerchantByApiKey.mockResolvedValueOnce(null);
 
       await expect(
-        guard.canActivate(makeContext({ headers: { 'x-api-key': 'bad' } })),
+        guard.canActivate(makeCtx({ headers: { 'x-api-key': 'bad' } })),
       ).rejects.toThrow(UnauthorizedException);
     });
 
@@ -103,6 +104,7 @@ describe('JwtAuthGuard', () => {
         email: 'm@example.com',
         role: MerchantRole.MERCHANT,
         apiKeyScopes: [],
+        apiKeyExpiresAt: null,
       });
       rateLimitService.checkApiKeyRateLimit.mockResolvedValueOnce({
         allowed: false,
@@ -112,7 +114,7 @@ describe('JwtAuthGuard', () => {
         retryAfter: 30,
       });
 
-      const allowed = await guard.canActivate(makeContext({ headers: { 'x-api-key': 'key' } }));
+      const allowed = await guard.canActivate(makeCtx({ headers: { 'x-api-key': 'key' } }));
 
       expect(allowed).toBe(false);
       expect(res.status).toHaveBeenCalledWith(429);
@@ -128,6 +130,7 @@ describe('JwtAuthGuard', () => {
         email: 'm@example.com',
         role: MerchantRole.MERCHANT,
         apiKeyScopes: ['payments:read'],
+        apiKeyExpiresAt: null,
       });
       rateLimitService.checkApiKeyRateLimit.mockResolvedValueOnce({
         allowed: true,
@@ -138,7 +141,7 @@ describe('JwtAuthGuard', () => {
       reflector.getAllAndOverride.mockReturnValueOnce(['payments:write']);
 
       await expect(
-        guard.canActivate(makeContext({ headers: { 'x-api-key': 'key' } })),
+        guard.canActivate(makeCtx({ headers: { 'x-api-key': 'key' } })),
       ).rejects.toThrow(ForbiddenException);
     });
 
@@ -148,6 +151,7 @@ describe('JwtAuthGuard', () => {
         email: 'm@example.com',
         role: MerchantRole.MERCHANT,
         apiKeyScopes: ['payments:read', 'payments:write'],
+        apiKeyExpiresAt: null,
       });
       rateLimitService.checkApiKeyRateLimit.mockResolvedValueOnce({
         allowed: true,
@@ -158,15 +162,74 @@ describe('JwtAuthGuard', () => {
       reflector.getAllAndOverride.mockReturnValueOnce(['payments:read']);
 
       await expect(
-        guard.canActivate(makeContext({ headers: { 'x-api-key': 'key' } })),
+        guard.canActivate(makeCtx({ headers: { 'x-api-key': 'key' } })),
       ).resolves.toBe(true);
     });
   });
 
   describe('JWT path', () => {
     it('delegates to AuthGuard when no API key header is present', async () => {
-      await expect(guard.canActivate(makeContext({ headers: {} }))).resolves.toBe(true);
+      await expect(guard.canActivate(makeCtx({ headers: {} }))).resolves.toBe(true);
       expect(authService.findMerchantByApiKey).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('API key expiry', () => {
+    it('allows a valid key with no expiry set', async () => {
+      authService.findMerchantByApiKey.mockResolvedValueOnce({
+        id: 'm-1',
+        email: 'm@example.com',
+        role: MerchantRole.MERCHANT,
+        apiKeyScopes: ['payments:read'],
+        apiKeyExpiresAt: null,
+      });
+      rateLimitService.checkApiKeyRateLimit.mockResolvedValueOnce({
+        allowed: true, limit: 1000, remaining: 999, resetAt: 1_700_000_000,
+      });
+      reflector.getAllAndOverride.mockReturnValueOnce(undefined);
+
+      await expect(guard.canActivate(makeCtx({ headers: { 'x-api-key': 'key' } }))).resolves.toBe(true);
+    });
+
+    it('allows a valid key whose expiry is in the future', async () => {
+      const future = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      authService.findMerchantByApiKey.mockResolvedValueOnce({
+        id: 'm-1',
+        email: 'm@example.com',
+        role: MerchantRole.MERCHANT,
+        apiKeyScopes: ['payments:read'],
+        apiKeyExpiresAt: future,
+      });
+      rateLimitService.checkApiKeyRateLimit.mockResolvedValueOnce({
+        allowed: true, limit: 1000, remaining: 999, resetAt: 1_700_000_000,
+      });
+      reflector.getAllAndOverride.mockReturnValueOnce(undefined);
+
+      await expect(guard.canActivate(makeCtx({ headers: { 'x-api-key': 'key' } }))).resolves.toBe(true);
+    });
+
+    it('throws UnauthorizedException with API_KEY_EXPIRED when key is expired', async () => {
+      const past = new Date(Date.now() - 1000);
+      authService.findMerchantByApiKey.mockResolvedValue({
+        id: 'm-1',
+        email: 'm@example.com',
+        role: MerchantRole.MERCHANT,
+        apiKeyScopes: ['payments:read'],
+        apiKeyExpiresAt: past,
+      });
+
+      await expect(
+        guard.canActivate(makeCtx({ headers: { 'x-api-key': 'expired' } })),
+      ).rejects.toThrow(UnauthorizedException);
+
+      try {
+        await guard.canActivate(makeCtx({ headers: { 'x-api-key': 'expired' } }));
+      } catch (err) {
+        expect(err).toBeInstanceOf(UnauthorizedException);
+        expect((err as UnauthorizedException).getResponse()).toMatchObject({
+          code: 'API_KEY_EXPIRED',
+        });
+      }
     });
   });
 });

@@ -109,6 +109,14 @@ export class Merchant {
   @Column({ name: 'api_key_lookup_hash', nullable: true, unique: true })
   apiKeyLookupHash?: string | null;
 
+  /** UTC timestamp at which this API key expires. Null means the key never expires. */
+  @Column({ type: 'timestamptz', nullable: true, default: null })
+  apiKeyExpiresAt: Date | null;
+
+  /** Set to the timestamp when the 14-day expiry-reminder email was sent. Null means not yet sent. */
+  @Column({ type: 'timestamptz', nullable: true, default: null })
+  apiKeyExpirySentAt: Date | null;
+
   @Column({ type: 'decimal', precision: 18, scale: 6, default: 0, transformer: numericColumnTransformer })
   totalVolumeUsd: string;
 

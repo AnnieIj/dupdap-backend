@@ -26,6 +26,16 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
         throw new UnauthorizedException('Invalid API key');
       }
 
+      // Check key expiry before allowing the request through
+      if (merchant.apiKeyExpiresAt != null && merchant.apiKeyExpiresAt <= new Date()) {
+        throw new UnauthorizedException({
+          statusCode: 401,
+          error: 'Unauthorized',
+          message: 'API key has expired. Please generate a new key.',
+          code: 'API_KEY_EXPIRED',
+        });
+      }
+
       const scopes = merchant.apiKeyScopes ?? [];
       req.user = {
         merchantId: merchant.id,

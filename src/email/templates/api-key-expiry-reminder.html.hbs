@@ -1,0 +1,14 @@
+<p>Hi {{merchantName}},</p>
+<p>Your DupDub API key is expiring soon. Once expired, any integration using this key will receive a <strong>401 API_KEY_EXPIRED</strong> error and will stop working.</p>
+<div class="detail-box">
+  <table>
+    <tr><td>Business</td><td>{{businessName}}</td></tr>
+    <tr><td>Key prefix</td><td><code>{{keyPrefix}}</code></td></tr>
+    <tr><td>Expires at</td><td>{{expiresAt}}</td></tr>
+    <tr><td>Days remaining</td><td><strong>{{daysRemaining}}</strong></td></tr>
+  </table>
+</div>
+<p>To avoid service disruption, generate a new API key from your dashboard and update your integration before the expiry date.</p>
+<a class="btn" href="{{dashboardUrl}}">Rotate API key</a>
+<p>If you have already rotated your key, you can disregard this message.</p>
+<p>Need help? Contact us at <a href="mailto:support@dupdub.xyz">support@dupdub.xyz</a>.</p>

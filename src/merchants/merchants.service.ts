@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
@@ -7,6 +7,10 @@ import { Merchant, MerchantStatus } from './entities/merchant.entity';
 import { ApiScope, API_KEY_SCOPES } from '../auth/scopes';
 import { UpdateMerchantDto } from './dto/create-merchant.dto';
 import { CacheService } from '../cache/cache.service';
+import { AuditLog } from '../audit/entities/audit-log.entity';
+
+/** Maximum allowed API key lifetime in milliseconds (365 days). */
+const MAX_EXPIRY_MS = 365 * 24 * 60 * 60 * 1000;
 
 @Injectable()
 export class MerchantsService {
@@ -16,6 +20,8 @@ export class MerchantsService {
   constructor(
     @InjectRepository(Merchant)
     private merchantsRepo: Repository<Merchant>,
+    @InjectRepository(AuditLog)
+    private readonly auditLogRepo: Repository<AuditLog>,
     private readonly cache: CacheService,
   ) {}
 
@@ -49,7 +55,21 @@ export class MerchantsService {
     return updated;
   }
 
-  async generateApiKey(id: string, scopes?: ApiScope[]): Promise<{ apiKey: string }> {
+  async generateApiKey(
+    id: string,
+    scopes?: ApiScope[],
+    expiresAt?: Date,
+  ): Promise<{ apiKey: string; expiresAt: Date | null }> {
+    if (expiresAt != null) {
+      const maxExpiry = new Date(Date.now() + MAX_EXPIRY_MS);
+      if (expiresAt <= new Date()) {
+        throw new BadRequestException('expiresAt must be in the future');
+      }
+      if (expiresAt > maxExpiry) {
+        throw new BadRequestException('expiresAt must not be more than 1 year from now');
+      }
+    }
+
     const merchant = await this.findOne(id);
     const rawKey = `cpk_${crypto.randomBytes(32).toString('hex')}`;
     const hash = await bcrypt.hash(rawKey, 10);
@@ -58,9 +78,51 @@ export class MerchantsService {
     merchant.apiKeyHash = hash;
     merchant.apiKeyLookupHash = crypto.createHash('sha256').update(rawKey).digest('hex');
     merchant.apiKeyScopes = scopes?.length ? scopes : API_KEY_SCOPES;
+    merchant.apiKeyExpiresAt = expiresAt ?? null;
+    // Reset the reminder flag whenever a new key is issued
+    merchant.apiKeyExpirySentAt = null;
     await this.merchantsRepo.save(merchant);
 
-    return { apiKey: rawKey };
+    return { apiKey: rawKey, expiresAt: merchant.apiKeyExpiresAt };
+  }
+
+  /**
+   * Admin operation: extend the expiry of an existing API key.
+   * Resets the 14-day reminder flag and writes an audit log entry.
+   */
+  async extendApiKeyExpiry(
+    merchantId: string,
+    newExpiresAt: Date,
+    adminId: string,
+  ): Promise<Merchant> {
+    const maxExpiry = new Date(Date.now() + MAX_EXPIRY_MS);
+    if (newExpiresAt <= new Date()) {
+      throw new BadRequestException('newExpiresAt must be in the future');
+    }
+    if (newExpiresAt > maxExpiry) {
+      throw new BadRequestException('newExpiresAt must not be more than 1 year from now');
+    }
+
+    const merchant = await this.findOne(merchantId);
+    const previousExpiresAt = merchant.apiKeyExpiresAt;
+
+    merchant.apiKeyExpiresAt = newExpiresAt;
+    // Reset so the merchant gets a fresh 14-day warning before the new expiry
+    merchant.apiKeyExpirySentAt = null;
+    await this.merchantsRepo.save(merchant);
+
+    await this.auditLogRepo.save({
+      actor: adminId,
+      action: 'api_key_expiry_extended',
+      resourceType: 'merchant',
+      resourceId: merchantId,
+      details: {
+        previousExpiresAt: previousExpiresAt?.toISOString() ?? null,
+        newExpiresAt: newExpiresAt.toISOString(),
+      },
+    });
+
+    return merchant;
   }
 
   async getProfile(id: string) {
@@ -80,5 +142,11 @@ export class MerchantsService {
     const updated = await this.merchantsRepo.save(merchant);
     await this.cache.del(this.activeMerchantCountCacheKey);
     return updated;
+  }
+
+  async verifyMerchant(id: string): Promise<Merchant> {
+    const merchant = await this.findOne(id);
+    merchant.status = MerchantStatus.ACTIVE;
+    return this.merchantsRepo.save(merchant);
   }
 }
