@@ -10,7 +10,7 @@ import { instanceToPlain } from 'class-transformer';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import { Merchant, MerchantStatus, MerchantRole } from '../merchants/entities/merchant.entity';
-import { Payment } from '../payments/entities/payment.entity';
+import { Payment, PaymentStatus } from '../payments/entities/payment.entity';
 import { Settlement, SettlementStatus } from '../settlements/entities/settlement.entity';
 import { FeeConfig, FeeType } from '../fee-config/entities/fee-config.entity';
 import { FeeHistory, FeeChangeType } from '../fee-config/entities/fee-history.entity';
@@ -19,6 +19,8 @@ import { FilterService } from '../common/filter.service';
 import { PaginationDto, PaginatedResponseDto } from '../common/dto/pagination.dto';
 import { CacheService } from '../cache/cache.service';
 import { StellarMonitorService } from '../stellar/stellar-monitor.service';
+import { TopMerchantsQueryDto } from '../analytics/dto/top-merchants-query.dto';
+import { TopMerchantItemDto, TopMerchantsResponseDto } from './dto/top-merchants-response.dto';
 
 @Injectable()
 export class AdminService {
@@ -741,6 +743,158 @@ export class AdminService {
       failedAuth,
       dataRetention,
       settlements,
+    };
+  }
+
+  // ── Top Merchants Analytics (#556) ────────────────────────────────────────
+
+  /**
+   * Returns top merchants ranked by settled volume for the given period.
+   *
+   * Cursor encoding: base64(JSON({ id, volume })) so that the keyset skips
+   * merchants with a lower volume than the last item on the previous page,
+   * or the same volume but a lexicographically greater id.
+   */
+  async getTopMerchants(query: TopMerchantsQueryDto): Promise<TopMerchantsResponseDto> {
+    const limit = query.limit ?? 10;
+    const period = query.period ?? '30d';
+
+    const periodDays = period === '7d' ? 7 : period === '90d' ? 90 : 30;
+    const periodEnd = new Date();
+    const periodStart = new Date(periodEnd.getTime() - periodDays * 24 * 60 * 60 * 1000);
+
+    const cacheKey = `admin:analytics:top-merchants:${period}:${limit}:${query.cursor ?? ''}`;
+    const ttlSeconds = 10 * 60; // 10 minutes
+
+    const { value, cacheHit } = await this.cache.getOrSet(
+      cacheKey,
+      async () => this.fetchTopMerchants(limit, period, periodStart, periodEnd, query.cursor),
+      { ttlSeconds },
+    );
+
+    return { ...value, cacheHit };
+  }
+
+  private decodeCursor(cursor: string): { id: string; volume: string } | null {
+    try {
+      return JSON.parse(Buffer.from(cursor, 'base64').toString('utf8'));
+    } catch {
+      return null;
+    }
+  }
+
+  private encodeCursor(id: string, volume: string): string {
+    return Buffer.from(JSON.stringify({ id, volume })).toString('base64');
+  }
+
+  private normalizeDecimal6(value: string | number | null | undefined): string {
+    const raw = String(value ?? '0').trim();
+    const [whole = '0', fractional = ''] = raw.split('.');
+    return `${whole || '0'}.${(fractional + '000000').slice(0, 6)}`;
+  }
+
+  private async fetchTopMerchants(
+    limit: number,
+    period: string,
+    periodStart: Date,
+    periodEnd: Date,
+    cursor?: string,
+  ): Promise<Omit<TopMerchantsResponseDto, 'cacheHit'>> {
+    // Fetch one extra row to determine whether there's a next page.
+    const fetchLimit = limit + 1;
+
+    const decoded = cursor ? this.decodeCursor(cursor) : null;
+
+    // Sub-query: settled payment metrics per merchant within the window.
+    const qb = this.paymentsRepo
+      .createQueryBuilder('p')
+      .innerJoin('p.merchant', 'm')
+      .select('p.merchantId', 'merchantId')
+      .addSelect('m.businessName', 'businessName')
+      .addSelect('m.country', 'country')
+      .addSelect(
+        'COALESCE(SUM(p.amountUsd) FILTER (WHERE p.status = :settled), 0)::numeric(18,6)::text',
+        'totalVolume',
+      )
+      .addSelect(
+        'COUNT(*) FILTER (WHERE p.status = :settled)',
+        'paymentCount',
+      )
+      .addSelect(
+        // Total of non-pending payments considered for success-rate denominator
+        'COUNT(*) FILTER (WHERE p.status NOT IN (:...excludedStatuses))',
+        'eligibleCount',
+      )
+      .setParameter('settled', PaymentStatus.SETTLED)
+      .setParameter('excludedStatuses', [PaymentStatus.PENDING])
+      .where('p.createdAt >= :periodStart', { periodStart })
+      .andWhere('p.createdAt < :periodEnd', { periodEnd })
+      .groupBy('p.merchantId')
+      .addGroupBy('m.businessName')
+      .addGroupBy('m.country');
+
+    // Keyset pagination: (volume DESC, merchantId ASC) tie-break.
+    if (decoded) {
+      qb.having(
+        `(COALESCE(SUM(p.amountUsd) FILTER (WHERE p.status = :settled), 0) < :cursorVolume)
+          OR (COALESCE(SUM(p.amountUsd) FILTER (WHERE p.status = :settled), 0) = :cursorVolume
+              AND p.merchantId > :cursorId)`,
+        { cursorVolume: parseFloat(decoded.volume), cursorId: decoded.id },
+      );
+    }
+
+    qb.orderBy('COALESCE(SUM(p.amountUsd) FILTER (WHERE p.status = :settled), 0)', 'DESC')
+      .addOrderBy('p.merchantId', 'ASC')
+      .limit(fetchLimit);
+
+    const rows: Array<{
+      merchantId: string;
+      businessName: string;
+      country: string | null;
+      totalVolume: string;
+      paymentCount: string;
+      eligibleCount: string;
+    }> = await qb.getRawMany();
+
+    const hasMore = rows.length > limit;
+    const pageRows = hasMore ? rows.slice(0, limit) : rows;
+
+    const data: TopMerchantItemDto[] = pageRows.map((row) => {
+      const totalVolume = this.normalizeDecimal6(row.totalVolume);
+      const paymentCount = Number(row.paymentCount);
+      const eligibleCount = Number(row.eligibleCount);
+      const avgOrderValue =
+        paymentCount > 0
+          ? this.normalizeDecimal6(parseFloat(totalVolume) / paymentCount)
+          : '0.000000';
+      const successRate =
+        eligibleCount > 0
+          ? parseFloat(((paymentCount / eligibleCount) * 100).toFixed(2))
+          : 0;
+
+      return {
+        merchantId: row.merchantId,
+        name: row.businessName,
+        country: row.country ?? null,
+        totalVolume,
+        paymentCount,
+        avgOrderValue,
+        successRate,
+      };
+    });
+
+    const lastRow = pageRows[pageRows.length - 1];
+    const nextCursor =
+      hasMore && lastRow
+        ? this.encodeCursor(lastRow.merchantId, lastRow.totalVolume)
+        : null;
+
+    return {
+      data,
+      period,
+      periodStart: periodStart.toISOString(),
+      periodEnd: periodEnd.toISOString(),
+      nextCursor,
     };
   }
 }
