@@ -1,4 +1,0 @@
-allowBuilds:
-  bcrypt: true
-  msgpackr-extract: true
-  protobufjs: true
