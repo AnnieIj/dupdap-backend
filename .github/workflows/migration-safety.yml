@@ -54,28 +54,35 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
 
       - name: Install dependencies
-        run: npm ci --ignore-scripts
+        # --no-frozen-lockfile mirrors how the main CI installs in the presence
+        # of an outdated lockfile; migrations scripts have no runtime behaviour
+        # that depends on exact resolved versions.
+        run: pnpm install --no-frozen-lockfile
 
       # ── Check 1: No uncommitted migration files ──────────────────────────
       # Ensures generated migrations are always committed before a PR merges.
       - name: Check for uncommitted migration files
-        run: npm run migration:uncommitted:check
+        run: pnpm migration:uncommitted:check
 
       # ── Check 2: All migrations apply cleanly ────────────────────────────
       # Runs every migration in sequence against a fresh Postgres instance
       # and exits non-zero if any migration fails.
       - name: Apply all migrations
-        run: npm run migration:check
+        run: pnpm migration:check
 
       # ── Check 3: All migrations roll back cleanly ────────────────────────
       # Applies then reverts every migration, verifying that down() is
       # complete and correct. Exits non-zero if any down() raises an error
       # or leaves the DB in an inconsistent state.
       - name: Run rollback check
-        run: npm run migration:rollback:check
+        run: pnpm migration:rollback:check
 
   # Separate job so it can be skipped on paths that don't touch SQL
   sql-injection-scan:
@@ -91,17 +98,24 @@ jobs:
       # strings rather than using parameterized queries. This is a best-effort
       # lint — it flags patterns like `query(\`... ${variable}`)` and requires
       # manual review of each match.
+      #
+      # Exclusions:
+      #   - IF NOT EXISTS / IF EXISTS / ADD VALUE IF NOT EXISTS  → safe DDL guards
+      #   - src/test/                                            → test helpers only
+      #                                                            use TypeORM-derived
+      #                                                            table names, never
+      #                                                            user-supplied input
+      #   - *.spec.ts / *.e2e-spec.ts / *.integration-spec.ts   → test files
       - name: Scan for unparameterized SQL interpolation
         run: |
           echo "Scanning for potentially unsafe raw SQL string interpolation..."
-          # Match template literals inside queryRunner.query() or connection.query()
-          # that contain ${...} — these may be injection vectors.
           MATCHES=$(grep -rn \
             --include="*.ts" \
             -E "\.query\(\`[^\`]*\\\$\{" \
             src/ \
             | grep -v "IF NOT EXISTS\|IF EXISTS\|ADD VALUE IF NOT EXISTS" \
-            | grep -v "\.spec\.ts\|\.e2e-spec\.ts" \
+            | grep -v "\.spec\.ts\|\.e2e-spec\.ts\|\.integration-spec\.ts" \
+            | grep -v "^src/test/" \
             || true)
 
           if [ -n "$MATCHES" ]; then
