@@ -73,8 +73,6 @@ describe('GroupsService', () => {
             getWallet: jest.fn(),
           },
         },
-          },
-        },
       ],
     }).compile();
 

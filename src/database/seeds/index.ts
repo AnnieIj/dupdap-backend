@@ -229,4 +229,46 @@ async function seedPayments(
       metadata: { source: 'seed' },
       confirmedAt: new Date(),
       settlementId: settlementMap.get('SETTLEMENT-COMPLETE-1')?.id,
-      settlementId: settlementMap.get('SETTLEMENT-COMPLETE-1')?.id,
+    },
+    {
+      id: predictableIds ? FIXED_IDS.paymentFailed : undefined,
+      reference: 'PAYMENT-FAILED-1',
+      merchantId: merchantMap.get('merchant3@localhost')?.id,
+      amountUsd: 300.0,
+      network: PaymentNetwork.STELLAR,
+      status: PaymentStatus.FAILED,
+      description: 'Failed payment demo',
+      customerEmail: 'customer5@example.com',
+      metadata: { source: 'seed' },
+      settlementId: settlementMap.get('SETTLEMENT-FAILED-1')?.id,
+    },
+    {
+      id: predictableIds ? FIXED_IDS.paymentRefunded : undefined,
+      reference: 'PAYMENT-REFUNDED-1',
+      merchantId: merchantMap.get('merchant1@localhost')?.id,
+      amountUsd: 75.0,
+      network: PaymentNetwork.STELLAR,
+      status: PaymentStatus.REFUNDED,
+      description: 'Refunded payment demo',
+      customerEmail: 'customer6@example.com',
+      metadata: { source: 'seed' },
+    },
+  ];
+
+  const references = seeds.map((seed) => seed.reference);
+  const existing = await repo.find({ where: { reference: In(references) } });
+  const existingByReference = new Map(existing.map((payment) => [payment.reference, payment]));
+
+  for (const seed of seeds) {
+    const current = existingByReference.get(seed.reference);
+    if (current) {
+      const merged = repo.merge(current, seed);
+      merged.id = current.id;
+      await repo.save(merged);
+    } else {
+      await repo.save(repo.create(seed));
+    }
+  }
+
+  console.log('Payments seeded.');
+}
