@@ -8,8 +8,10 @@ import {
   ApiUnauthorizedResponse,
   ApiNotFoundResponse,
   ApiBadRequestResponse,
+  ApiForbiddenResponse,
   ApiResponse,
   ApiParam,
+  ApiSecurity,
 } from '@nestjs/swagger';
 import { PaymentsService } from './payments.service';
 import { CreatePaymentDto } from './dto/create-payment.dto';
@@ -24,6 +26,7 @@ import { Auditable } from '../audit/decorators/auditable.decorator';
 
 @ApiTags('payments')
 @ApiBearerAuth('bearer')
+@ApiSecurity('api-key')
 @UseGuards(JwtAuthGuard)
 @Controller('payments')
 export class PaymentsController {
@@ -35,7 +38,8 @@ export class PaymentsController {
   @Auditable({ action: 'PAYMENT_CREATED', resource: 'payment' })
   @ApiOperation({ summary: 'Create a payment request' })
   @ApiOkResponse({ description: 'Payment created' })
-  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT / API key' })
+  @ApiForbiddenResponse({ description: 'API key missing payments:write scope' })
   @ApiBadRequestResponse({ description: 'Validation failed' })
   @ApiResponse({ status: 500, description: 'Internal server error' })
   create(@Request() req: { user: { merchantId: string } }, @Body() dto: CreatePaymentDto) {
@@ -53,7 +57,8 @@ export class PaymentsController {
       'any payment is written — the entire batch reverts if any single entry is invalid.',
   })
   @ApiOkResponse({ type: BatchPaymentResultDto, description: 'IDs of all created payments' })
-  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT / API key' })
+  @ApiForbiddenResponse({ description: 'API key missing payments:write scope' })
   @ApiBadRequestResponse({ description: 'Validation failed — entire batch rejected' })
   @ApiResponse({ status: 500, description: 'Internal server error' })
   createBatch(
@@ -69,7 +74,8 @@ export class PaymentsController {
   @ApiQuery({ name: 'page', required: false })
   @ApiQuery({ name: 'limit', required: false })
   @ApiOkResponse({ description: 'Paginated payments' })
-  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT / API key' })
+  @ApiForbiddenResponse({ description: 'API key missing payments:read scope' })
   @ApiResponse({ status: 500, description: 'Internal server error' })
   findAll(@Request() req: { user: { merchantId: string } }, @Query() pagination: PaginationDto) {
     return this.paymentsService.findAll(req.user.merchantId, pagination.page, pagination.limit);
@@ -79,7 +85,8 @@ export class PaymentsController {
   @Scopes('payments:read')
   @ApiOperation({ summary: 'Payment statistics' })
   @ApiOkResponse({ description: 'Aggregated stats' })
-  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT / API key' })
+  @ApiForbiddenResponse({ description: 'API key missing payments:read scope' })
   @ApiResponse({ status: 500, description: 'Internal server error' })
   getStats(@Request() req: { user: { merchantId: string } }) {
     return this.paymentsService.getStats(req.user.merchantId);
@@ -90,7 +97,8 @@ export class PaymentsController {
   @ApiOperation({ summary: 'Get payment by ID' })
   @ApiParam({ name: 'id', description: 'Payment UUID' })
   @ApiOkResponse({ description: 'Payment detail' })
-  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT / API key' })
+  @ApiForbiddenResponse({ description: 'API key missing payments:read scope' })
   @ApiNotFoundResponse({ description: 'Payment not found' })
   @ApiResponse({ status: 500, description: 'Internal server error' })
   findOne(@Request() req: { user: { merchantId: string } }, @Param('id', ParseUUIDPipe) id: string) {
@@ -103,7 +111,8 @@ export class PaymentsController {
   @ApiOperation({ summary: 'Initiate a refund for a settled payment' })
   @ApiParam({ name: 'id', description: 'Payment UUID' })
   @ApiOkResponse({ description: 'Refund successful' })
-  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT / API key' })
+  @ApiForbiddenResponse({ description: 'API key missing payments:write scope' })
   @ApiNotFoundResponse({ description: 'Payment not found' })
   @ApiBadRequestResponse({ description: 'Refund not possible' })
   @ApiResponse({ status: 500, description: 'Internal server error' })

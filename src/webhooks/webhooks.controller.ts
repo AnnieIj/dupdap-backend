@@ -8,8 +8,10 @@ import {
   ApiUnauthorizedResponse,
   ApiNotFoundResponse,
   ApiBadRequestResponse,
+  ApiForbiddenResponse,
   ApiResponse,
   ApiParam,
+  ApiSecurity,
 } from '@nestjs/swagger';
 import { WebhooksService } from './webhooks.service';
 import { JwtAuthGuard } from '../auth/guards/jwt.guard';
@@ -18,6 +20,7 @@ import { CreateWebhookDto } from './dto/create-webhook.dto';
 
 @ApiTags('webhooks')
 @ApiBearerAuth('bearer')
+@ApiSecurity('api-key')
 @UseGuards(JwtAuthGuard)
 @Controller('webhooks')
 export class WebhooksController {
@@ -27,7 +30,8 @@ export class WebhooksController {
   @Scopes('webhooks:manage')
   @ApiOperation({ summary: 'List webhooks' })
   @ApiOkResponse({ description: 'Webhook subscriptions' })
-  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT / API key' })
+  @ApiForbiddenResponse({ description: 'API key missing webhooks:manage scope' })
   @ApiResponse({ status: 500, description: 'Internal server error' })
   findAll(@Request() req: { user: { merchantId: string } }) {
     return this.webhooksService.findAll(req.user.merchantId);
@@ -37,7 +41,8 @@ export class WebhooksController {
   @Scopes('webhooks:manage')
   @ApiOperation({ summary: 'Create webhook' })
   @ApiCreatedResponse({ description: 'Webhook created' })
-  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT / API key' })
+  @ApiForbiddenResponse({ description: 'API key missing webhooks:manage scope' })
   @ApiBadRequestResponse({ description: 'Validation failed' })
   @ApiResponse({ status: 500, description: 'Internal server error' })
   create(@Request() req: { user: { merchantId: string } }, @Body() dto: CreateWebhookDto) {
@@ -49,7 +54,8 @@ export class WebhooksController {
   @ApiOperation({ summary: 'Delete webhook' })
   @ApiParam({ name: 'id', description: 'Webhook id' })
   @ApiOkResponse({ description: 'Deleted' })
-  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT / API key' })
+  @ApiForbiddenResponse({ description: 'API key missing webhooks:manage scope' })
   @ApiNotFoundResponse({ description: 'Webhook not found' })
   @ApiResponse({ status: 500, description: 'Internal server error' })
   remove(@Request() req: { user: { merchantId: string } }, @Param('id', ParseUUIDPipe) id: string) {

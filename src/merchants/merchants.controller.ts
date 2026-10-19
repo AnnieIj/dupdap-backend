@@ -6,7 +6,9 @@ import {
   ApiOkResponse,
   ApiUnauthorizedResponse,
   ApiBadRequestResponse,
+  ApiForbiddenResponse,
   ApiResponse,
+  ApiSecurity,
 } from '@nestjs/swagger';
 import { MerchantsService } from './merchants.service';
 import { UpdateMerchantDto } from './dto/create-merchant.dto';
@@ -18,6 +20,7 @@ import { UpdateNotificationPrefsDto, NotificationPrefsResponseDto } from '../not
 
 @ApiTags('merchants')
 @ApiBearerAuth('bearer')
+@ApiSecurity('api-key')
 @UseGuards(JwtAuthGuard)
 @Controller('merchants')
 export class MerchantsController {
@@ -27,9 +30,11 @@ export class MerchantsController {
   ) {}
 
   @Get('me')
+  @Scopes('profile:read')
   @ApiOperation({ summary: 'Get merchant profile' })
   @ApiOkResponse({ description: 'Merchant profile' })
-  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT / API key' })
+  @ApiForbiddenResponse({ description: 'API key missing profile:read scope' })
   @ApiResponse({ status: 500, description: 'Internal server error' })
   getProfile(@Request() req: { user: { merchantId: string } }) {
     return this.merchantsService.getProfile(req.user.merchantId);
@@ -39,7 +44,8 @@ export class MerchantsController {
   @Scopes('merchant:manage')
   @ApiOperation({ summary: 'Update merchant profile' })
   @ApiOkResponse({ description: 'Updated merchant' })
-  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT / API key' })
+  @ApiForbiddenResponse({ description: 'Requires interactive JWT session — not reachable via API key' })
   @ApiBadRequestResponse({ description: 'Validation failed' })
   @ApiResponse({ status: 500, description: 'Internal server error' })
   update(@Request() req: { user: { merchantId: string } }, @Body() dto: UpdateMerchantDto) {
@@ -50,7 +56,8 @@ export class MerchantsController {
   @Scopes('merchant:manage')
   @ApiOperation({ summary: 'Generate API key' })
   @ApiOkResponse({ description: 'New API key payload' })
-  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT / API key' })
+  @ApiForbiddenResponse({ description: 'Requires interactive JWT session — not reachable via API key' })
   @ApiResponse({ status: 500, description: 'Internal server error' })
   generateApiKey(
     @Request() req: { user: { merchantId: string } },
@@ -60,9 +67,11 @@ export class MerchantsController {
   }
 
   @Get('me/notification-prefs')
+  @Scopes('notifications:read')
   @ApiOperation({ summary: 'Get notification preferences' })
   @ApiOkResponse({ type: NotificationPrefsResponseDto, description: 'Current notification preferences per channel and event' })
-  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT / API key' })
+  @ApiForbiddenResponse({ description: 'API key missing notifications:read scope' })
   getNotificationPrefs(
     @Request() req: { user: { merchantId: string } },
   ): Promise<NotificationPrefsResponseDto> {
@@ -70,9 +79,11 @@ export class MerchantsController {
   }
 
   @Patch('me/notification-prefs')
+  @Scopes('notifications:read')
   @ApiOperation({ summary: 'Update notification preferences' })
   @ApiOkResponse({ type: NotificationPrefsResponseDto, description: 'Updated notification preferences' })
-  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT / API key' })
+  @ApiForbiddenResponse({ description: 'API key missing notifications:read scope' })
   @ApiBadRequestResponse({ description: 'Validation failed or attempted to disable in_app channel' })
   updateNotificationPrefs(
     @Request() req: { user: { merchantId: string } },

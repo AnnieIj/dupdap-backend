@@ -10,26 +10,31 @@ import {
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiForbiddenResponse,
   ApiOkResponse,
   ApiOperation,
   ApiQuery,
   ApiResponse,
+  ApiSecurity,
   ApiTags,
 } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt.guard';
+import { Scopes } from '../auth/decorators/scopes.decorator';
 import { MerchantRole } from '../merchants/entities/merchant.entity';
 import { AnalyticsExportFormat } from './entities/analytics-export.entity';
 import { AnalyticsExportService } from './analytics-export.service';
 
 @ApiTags('analytics')
-@ApiBearerAuth()
+@ApiBearerAuth('bearer')
+@ApiSecurity('api-key')
 @UseGuards(JwtAuthGuard)
 @Controller('analytics')
 export class AnalyticsExportController {
   constructor(private readonly analyticsExportService: AnalyticsExportService) {}
 
   @Post('export')
+  @Scopes('analytics:read')
   @ApiOperation({ summary: 'Queue an analytics export' })
   @ApiQuery({ name: 'format', required: false, enum: ['pdf'] })
   @ApiQuery({ name: 'period', required: false, enum: ['daily', 'monthly'] })
@@ -37,6 +42,7 @@ export class AnalyticsExportController {
   @ApiQuery({ name: 'dateTo', required: false, description: 'End date in YYYY-MM-DD format' })
   @ApiOkResponse({ description: 'Export queued successfully' })
   @ApiResponse({ status: 400, description: 'Invalid export request' })
+  @ApiForbiddenResponse({ description: 'API key missing analytics:read scope' })
   queueExport(
     @Req() req: Request & { user: { merchantId: string; role: MerchantRole } },
     @Query('format') format: string = AnalyticsExportFormat.PDF,

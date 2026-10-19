@@ -3,7 +3,12 @@ export type ApiScope =
   | 'payments:write'
   | 'settlements:read'
   | 'webhooks:manage'
-  | 'merchant:manage';
+  | 'merchant:manage'
+  | 'analytics:read'
+  | 'notifications:read'
+  | 'profile:read'
+  | 'profile:write'
+  | 'groups:manage';
 
 /**
  * Scopes that may be assigned to a merchant API key.
@@ -20,4 +25,9 @@ export const API_KEY_SCOPES: ApiScope[] = [
   'payments:write',
   'settlements:read',
   'webhooks:manage',
+  'analytics:read',
+  'notifications:read',
+  'profile:read',
+  'profile:write',
+  'groups:manage',
 ];
