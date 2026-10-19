@@ -5,8 +5,10 @@ import {
   ApiOperation,
   ApiOkResponse,
   ApiUnauthorizedResponse,
+  ApiForbiddenResponse,
   ApiResponse,
   ApiHeader,
+  ApiSecurity,
 } from '@nestjs/swagger';
 import { SettlementsService, PartnerCallbackPayload } from './settlements.service';
 import { JwtAuthGuard } from '../auth/guards/jwt.guard';
@@ -16,6 +18,7 @@ import { PartnerSignatureGuard } from './guards/partner-signature.guard';
 
 @ApiTags('settlements')
 @ApiBearerAuth('bearer')
+@ApiSecurity('api-key')
 @UseGuards(JwtAuthGuard)
 @Controller('settlements')
 export class SettlementsController {
@@ -25,7 +28,8 @@ export class SettlementsController {
   @Scopes('settlements:read')
   @ApiOperation({ summary: 'List settlements' })
   @ApiOkResponse({ description: 'Paginated settlements' })
-  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT / API key' })
+  @ApiForbiddenResponse({ description: 'API key missing settlements:read scope' })
   @ApiResponse({ status: 500, description: 'Internal server error' })
   findAll(@Request() req: { user: { merchantId: string } }, @Query() pagination: PaginationDto) {
     return this.settlementsService.findAll(req.user.merchantId, pagination.page, pagination.limit);
