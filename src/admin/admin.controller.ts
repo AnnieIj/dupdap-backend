@@ -12,9 +12,11 @@ import {
   Headers,
   Res,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiParam } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiParam, ApiResponse } from '@nestjs/swagger';
 import { QueryAdminPaymentsDto } from './dto/query-admin-payments.dto';
 import { UpdateFeeDto } from './dto/update-fee.dto';
+import { TopMerchantsQueryDto } from '../analytics/dto/top-merchants-query.dto';
+import { TopMerchantsResponseDto } from './dto/top-merchants-response.dto';
 import { Request, Response } from 'express';
 import { AdminService } from './admin.service';
 import { RatesService } from '../rates/rates.service';
@@ -125,6 +127,19 @@ export class AdminController {
   @ApiOperation({ summary: 'Get real-time dashboard counters (max age: 60s)' })
   getLiveAnalytics() {
     return this.adminService.getLiveAnalytics();
+  }
+
+  @Get('analytics/top-merchants')
+  @ApiOperation({
+    summary: 'Get top merchants ranked by settled payment volume',
+    description:
+      'Returns merchants ranked by total settled USD volume for the given period. ' +
+      'Supports cursor-based pagination — pass the `nextCursor` from the previous ' +
+      'response as the `cursor` query parameter to get the next page.',
+  })
+  @ApiResponse({ status: 200, type: TopMerchantsResponseDto })
+  getTopMerchants(@Query() query: TopMerchantsQueryDto): Promise<TopMerchantsResponseDto> {
+    return this.adminService.getTopMerchants(query);
   }
 
   // ── Admin User Management with 2FA (#707) ──────────────────────────────────

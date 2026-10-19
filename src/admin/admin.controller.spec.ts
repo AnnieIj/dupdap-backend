@@ -7,6 +7,23 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt.guard';
 import { IpAllowlistGuard } from '../security/ip-allowlist.guard';
 import { Reflector } from '@nestjs/core';
+import { TopMerchantsResponseDto } from './dto/top-merchants-response.dto';
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+function makeTopMerchantsResponse(overrides: Partial<TopMerchantsResponseDto> = {}): TopMerchantsResponseDto {
+  return {
+    data: [],
+    period: '30d',
+    periodStart: '2026-09-18T00:00:00.000Z',
+    periodEnd: '2026-10-18T00:00:00.000Z',
+    nextCursor: null,
+    cacheHit: false,
+    ...overrides,
+  };
+}
+
+// ─── Module setup ───────────────────────────────────────────────────────────
 
 describe('AdminController', () => {
   let controller: AdminController;
@@ -40,6 +57,7 @@ describe('AdminController', () => {
     getDataRetentionReport: jest.fn(),
     getSettlementReconciliationReport: jest.fn(),
     getFullComplianceReport: jest.fn(),
+    getTopMerchants: jest.fn(),
   };
 
   const mockRatesService = {
@@ -168,7 +186,7 @@ describe('AdminController', () => {
 
       expect(
         await controller.updateFee(
-          { feeType: 'transfer' as any, newRate: '0.02', reason: 'promo' },
+          { feeType: 'transfer' as any, newRate: '0.02', reason: 'promo' } as any,
           req,
         ),
       ).toBe(result);
@@ -236,6 +254,7 @@ describe('AdminController', () => {
         'StrongPass1!',
         'Ops',
         MerchantRole.SUPERADMIN,
+        'admin-1',
       );
     });
   });
@@ -246,7 +265,7 @@ describe('AdminController', () => {
       const req: any = { user: { id: 'admin-1', role: MerchantRole.SUPERADMIN } };
 
       expect(await controller.deleteAdmin('target-id', req)).toEqual({ deleted: true });
-      expect(service.deleteAdmin).toHaveBeenCalledWith('target-id', MerchantRole.SUPERADMIN);
+      expect(service.deleteAdmin).toHaveBeenCalledWith('target-id', MerchantRole.SUPERADMIN, 'admin-1');
     });
   });
 
@@ -484,6 +503,73 @@ describe('AdminController', () => {
       expect(fromDate).toBeInstanceOf(Date);
       expect(toDate).toBeInstanceOf(Date);
       expect(toDate.getTime()).toBeGreaterThan(fromDate.getTime());
+    });
+  });
+
+  // ── getTopMerchants ───────────────────────────────────────────────────────
+
+  describe('getTopMerchants', () => {
+    it('should delegate to service.getTopMerchants with the parsed query', async () => {
+      const response = makeTopMerchantsResponse();
+      mockAdminService.getTopMerchants.mockResolvedValue(response);
+
+      const query = { limit: 20, period: '30d' };
+      const result = await controller.getTopMerchants(query);
+
+      expect(result).toBe(response);
+      expect(service.getTopMerchants).toHaveBeenCalledWith(query);
+    });
+
+    it('should pass a cursor through to the service', async () => {
+      const cursor = Buffer.from(JSON.stringify({ id: 'uuid-x', volume: '9999.000000' })).toString('base64');
+      const response = makeTopMerchantsResponse({ nextCursor: null });
+      mockAdminService.getTopMerchants.mockResolvedValue(response);
+
+      await controller.getTopMerchants({ limit: 10, period: '30d', cursor });
+      expect(service.getTopMerchants).toHaveBeenCalledWith(
+        expect.objectContaining({ cursor }),
+      );
+    });
+
+    it('should return data with the correct shape', async () => {
+      const item = {
+        merchantId: 'uuid-merchant-1',
+        name: 'Acme Corp',
+        country: 'US',
+        totalVolume: '50000.000000',
+        paymentCount: 200,
+        avgOrderValue: '250.000000',
+        successRate: 95.24,
+      };
+      const response = makeTopMerchantsResponse({
+        data: [item],
+        period: '7d',
+        nextCursor: 'someBase64Cursor==',
+      });
+      mockAdminService.getTopMerchants.mockResolvedValue(response);
+
+      const result = await controller.getTopMerchants({ limit: 5, period: '7d' });
+
+      expect(result.data).toHaveLength(1);
+      expect(result.data[0]).toMatchObject(item);
+      expect(result.period).toBe('7d');
+      expect(result.nextCursor).toBe('someBase64Cursor==');
+    });
+
+    it('should pass default values when query has no explicit params', async () => {
+      const response = makeTopMerchantsResponse();
+      mockAdminService.getTopMerchants.mockResolvedValue(response);
+
+      await controller.getTopMerchants({});
+      expect(service.getTopMerchants).toHaveBeenCalledWith({});
+    });
+
+    it('should return cacheHit=true when result comes from cache', async () => {
+      const response = makeTopMerchantsResponse({ cacheHit: true });
+      mockAdminService.getTopMerchants.mockResolvedValue(response);
+
+      const result = await controller.getTopMerchants({ limit: 10, period: '30d' });
+      expect(result.cacheHit).toBe(true);
     });
   });
 });

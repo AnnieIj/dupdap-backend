@@ -64,7 +64,6 @@ describe('AmlController', () => {
     expect(service.review).toHaveBeenCalledWith(
       'flag-1',
       AmlFlagStatus.ESCALATED,
-    await controller.review('flag-1', dto, req);
       'Needs investigation',
     );
   });
@@ -89,8 +88,6 @@ describe('AmlController', () => {
       controller.review('flag-1', { status: AmlFlagStatus.CLEARED }, { user: {} } as any),
     ).rejects.toThrow(UnauthorizedException);
     expect(service.review).not.toHaveBeenCalled();
-  });
-
   });
 
   it('delegates findByMerchant', async () => {
